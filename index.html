@@ -3954,51 +3954,56 @@ CLEAN_AGENT_LOSS_LIMIT=0.05
       }
 
       // Highlight active pending and accepted issues with Grammarly marks
+      // SKIP regex decoration for spreadsheet HTML — the regex corrupts HTML attributes
+      // (e.g. finding "electronics" inside a <td> attribute breaks the tag structure)
+      const isSpreadsheet = contentHtml && (contentHtml.includes('<table') || contentHtml.includes('<thead'));
       let decoratedHtml = contentHtml;
 
-      const escapeRegex = (s) => s.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+      if (!isSpreadsheet) {
+        const escapeRegex = (s) => s.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
 
-      activeAuditResult.issues.forEach(iss => {
-        const snippet = iss.originalSnippet;
-        if (!snippet) return;
-        
-        // Create a flexible regex to find the snippet even if it spans tags or spaces
-        const words = snippet.trim().split(/\s+/).map(escapeRegex);
-        // Allow optional HTML tags and whitespace between words
-        const flexiblePattern = words.join('(?:\\s|<[^>]+>)+');
-        const regex = new RegExp(`(${flexiblePattern})`, 'i');
-
-        const underlineClass = (iss.category || '').toLowerCase().includes('spell')
-          ? 'grammarly-spelling'
-          : `grammarly-${iss.severity.toLowerCase()}`;
-
-        if (iss.status === 'pending') {
-          const match = decoratedHtml.match(regex);
-          if (match) {
-            const matchedText = match[0];
-            const underlineHtml = `<span class="grammarly-underline ${underlineClass} ${iss.id === currentRawDataset.focusedIssueId ? 'grammarly-active-highlight' : ''}" id="g-underline-${iss.id}" onclick="focusGrammarlyIssue(${iss.id})" title="Click to review: ${escapeHtml(iss.problem)}">${matchedText}</span>`;
-            decoratedHtml = decoratedHtml.replace(regex, underlineHtml);
-          } else {
-            // Fallback to exact match if regex fails
-            const safeSnippet = escapeHtml(snippet);
-            const underlineHtml = `<span class="grammarly-underline ${underlineClass} ${iss.id === currentRawDataset.focusedIssueId ? 'grammarly-active-highlight' : ''}" id="g-underline-${iss.id}" onclick="focusGrammarlyIssue(${iss.id})" title="Click to review: ${escapeHtml(iss.problem)}">${safeSnippet}</span>`;
-            if (decoratedHtml.includes(safeSnippet)) decoratedHtml = decoratedHtml.replace(safeSnippet, underlineHtml);
-            else if (decoratedHtml.includes(snippet)) decoratedHtml = decoratedHtml.replace(snippet, underlineHtml);
-          }
-        } else if (iss.status === 'accepted') {
-          const rep = escapeHtml(iss.customReplacement || iss.replacementSnippet);
-          const correctedHtml = `<ins class="grammarly-corrected" title="Cleaned by Clean Agent: ${escapeHtml(iss.problem)}">${rep}</ins>`;
+        activeAuditResult.issues.forEach(iss => {
+          const snippet = iss.originalSnippet;
+          if (!snippet) return;
           
-          const match = decoratedHtml.match(regex);
-          if (match) {
-            decoratedHtml = decoratedHtml.replace(regex, correctedHtml);
-          } else {
-            const safeSnippet = escapeHtml(snippet);
-            if (decoratedHtml.includes(safeSnippet)) decoratedHtml = decoratedHtml.replace(safeSnippet, correctedHtml);
-            else if (decoratedHtml.includes(snippet)) decoratedHtml = decoratedHtml.replace(snippet, correctedHtml);
+          // Create a flexible regex to find the snippet even if it spans tags or spaces
+          const words = snippet.trim().split(/\s+/).map(escapeRegex);
+          // Allow optional HTML tags and whitespace between words
+          const flexiblePattern = words.join('(?:\\s|<[^>]+>)+');
+          const regex = new RegExp(`(${flexiblePattern})`, 'i');
+
+          const underlineClass = (iss.category || '').toLowerCase().includes('spell')
+            ? 'grammarly-spelling'
+            : `grammarly-${iss.severity.toLowerCase()}`;
+
+          if (iss.status === 'pending') {
+            const match = decoratedHtml.match(regex);
+            if (match) {
+              const matchedText = match[0];
+              const underlineHtml = `<span class="grammarly-underline ${underlineClass} ${iss.id === currentRawDataset.focusedIssueId ? 'grammarly-active-highlight' : ''}" id="g-underline-${iss.id}" onclick="focusGrammarlyIssue(${iss.id})" title="Click to review: ${escapeHtml(iss.problem)}">${matchedText}</span>`;
+              decoratedHtml = decoratedHtml.replace(regex, underlineHtml);
+            } else {
+              // Fallback to exact match if regex fails
+              const safeSnippet = escapeHtml(snippet);
+              const underlineHtml = `<span class="grammarly-underline ${underlineClass} ${iss.id === currentRawDataset.focusedIssueId ? 'grammarly-active-highlight' : ''}" id="g-underline-${iss.id}" onclick="focusGrammarlyIssue(${iss.id})" title="Click to review: ${escapeHtml(iss.problem)}">${safeSnippet}</span>`;
+              if (decoratedHtml.includes(safeSnippet)) decoratedHtml = decoratedHtml.replace(safeSnippet, underlineHtml);
+              else if (decoratedHtml.includes(snippet)) decoratedHtml = decoratedHtml.replace(snippet, underlineHtml);
+            }
+          } else if (iss.status === 'accepted') {
+            const rep = escapeHtml(iss.customReplacement || iss.replacementSnippet);
+            const correctedHtml = `<ins class="grammarly-corrected" title="Cleaned by Clean Agent: ${escapeHtml(iss.problem)}">${rep}</ins>`;
+            
+            const match = decoratedHtml.match(regex);
+            if (match) {
+              decoratedHtml = decoratedHtml.replace(regex, correctedHtml);
+            } else {
+              const safeSnippet = escapeHtml(snippet);
+              if (decoratedHtml.includes(safeSnippet)) decoratedHtml = decoratedHtml.replace(safeSnippet, correctedHtml);
+              else if (decoratedHtml.includes(snippet)) decoratedHtml = decoratedHtml.replace(snippet, correctedHtml);
+            }
           }
-        }
-      });
+        });
+      }
 
       paper.innerHTML = decoratedHtml;
     }
@@ -4265,33 +4270,15 @@ CLEAN_AGENT_LOSS_LIMIT=0.05
 
         const target = iss.originalSnippet;
         const rep = iss.customReplacement || iss.replacementSnippet;
-        const targetCol = iss.column;
 
+        // For plain-text documents (PDFs, text files), apply split/join replacement on liveText
         if (currentRawDataset.liveText && target && rep) {
           currentRawDataset.liveText = currentRawDataset.liveText.split(target).join(rep);
         }
 
-        if (currentRawDataset.rows && Array.isArray(currentRawDataset.rows)) {
-          currentRawDataset.rows.forEach(r => {
-            // Apply only to the targeted column when specified to prevent cross-column corruption
-            if (targetCol && targetCol !== 'All Columns' && r[targetCol] !== undefined) {
-              if (typeof r[targetCol] === 'string' && target && r[targetCol].includes(target)) {
-                r[targetCol] = r[targetCol].split(target).join(rep);
-              } else if (target !== undefined && target !== null && String(r[targetCol]) === String(target)) {
-                r[targetCol] = rep;
-              }
-            } else {
-              Object.keys(r).forEach(k => {
-                if (typeof r[k] === 'string' && target && r[k].includes(target)) {
-                  r[k] = r[k].split(target).join(rep);
-                } else if (target !== undefined && target !== null && String(r[k]) === String(target)) {
-                  r[k] = rep;
-                }
-              });
-            }
-          });
-        }
-
+        // For spreadsheet rows, use ONLY executeFn (which does proper exact-match checks)
+        // Do NOT use split(target).join(rep) on rows — substring matching causes corruption
+        // e.g. target="1003" matches inside "ORD-1003" causing "ORD-ORD-1003"
         if (typeof iss.executeFn === 'function' && Array.isArray(currentRawDataset.rows)) {
           currentRawDataset.rows.forEach(r => iss.executeFn(r));
         }
