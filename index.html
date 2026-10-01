@@ -2604,30 +2604,7 @@ CLEAN_AGENT_LOSS_LIMIT=0.05
         });
       }
 
-      // Default baseline issue if dataset was already pristine
-      if (issues.length === 0) {
-        issues.push({
-          id: 1,
-          column: cols[0] || 'Dataset',
-          problem: 'Schema delimiters and character encodings validation.',
-          severity: 'Low',
-          category: 'Formatting',
-          originalSnippet: (cols[0] && cols[0].length < 25) ? cols[0] : 'Data',
-          replacementSnippet: (cols[0] && cols[0].length < 25) ? cols[0] : 'Data',
-          what: 'Sanitize hidden control characters and normalize UTF-8 string encoding.',
-          why: 'Ensures cross-platform database compatibility and clean rendering.',
-          evidence: 'Verified 0 corrupted byte markers.',
-          confidence: 99.8,
-          estimatedLoss: 0.0,
-          risk: 'Low',
-          reversible: true,
-          status: 'pending',
-          approved: false,
-          customReplacement: null,
-          rowIndex: 0,
-          executeFn: () => {}
-        });
-      }
+      // Real detected issues only - no synthetic fallback issues
 
       // Merge Gemini AI findings — push (not unshift) so sort handles ordering
       if (window._latestGeminiFindings && Array.isArray(window._latestGeminiFindings)) {
@@ -3084,6 +3061,16 @@ CLEAN_AGENT_LOSS_LIMIT=0.05
       else if (filter === 'critical') filtered = filtered.filter(i => i.severity === 'Critical');
       else if (filter === 'format') filtered = filtered.filter(i => ['Formatting', 'Whitespace'].includes(i.category) || i.severity === 'Low');
       else if (filter === 'semantic') filtered = filtered.filter(i => ['Constraint Violation', 'Hard Constraint', 'Malformed Syntax'].includes(i.category) || i.severity === 'Moderate');
+
+      if (filtered.length === 0) {
+        feed.innerHTML = `
+          <div class="text-center py-10 px-4 liquid-glass-card rounded-2xl border border-emerald-200/60 bg-emerald-50/20">
+            <span class="text-3xl block mb-2">✨</span>
+            <h4 class="font-bold text-slate-800 text-sm">No Anomaly Detected</h4>
+            <p class="text-xs text-slate-500 mt-1 max-w-xs mx-auto">This dataset has zero detected quality issues or typos in this category.</p>
+          </div>`;
+        return;
+      }
 
       feed.innerHTML = filtered.map(iss => {
         const isAccepted = iss.status === 'accepted';
@@ -3679,6 +3666,15 @@ CLEAN_AGENT_LOSS_LIMIT=0.05
 
     function renderPlanIssues() {
       const container = document.getElementById('planIssuesContainer');
+      if (!container) return;
+      if (!activeAuditResult.issues || activeAuditResult.issues.length === 0) {
+        container.innerHTML = `
+          <div class="text-center py-8 px-4 liquid-glass-card rounded-2xl border border-emerald-200/60 bg-emerald-50/20">
+            <span class="text-2xl block mb-1">✨</span>
+            <p class="text-xs font-semibold text-emerald-800">Dataset is clean — no actionable anomalies detected.</p>
+          </div>`;
+        return;
+      }
       container.innerHTML = activeAuditResult.issues.map(iss => `
         <div class="liquid-glass-card rounded-2xl p-5 transition-all ${iss.approved ? 'border-sky-300' : 'opacity-70 bg-slate-100'}">
           <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
