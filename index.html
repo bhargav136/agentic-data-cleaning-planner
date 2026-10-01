@@ -1916,6 +1916,29 @@ CLEAN_AGENT_LOSS_LIMIT=0.05
     }
 
     function buildSpreadsheetHtmlPreview(rows, cols) {
+      // Build a fast lookup: which row indices are duplicates?
+      const dupIndices = new Set();
+      const seenSigs = new Map();
+      rows.forEach((r, idx) => {
+        const sig = cols.map(c => {
+          const v = r[c];
+          return v === null || v === undefined ? '' : String(v).trim().toLowerCase();
+        }).join('|||');
+        if (seenSigs.has(sig)) { dupIndices.add(idx); }
+        else seenSigs.set(sig, idx);
+      });
+
+      // Build lookup of outlier values per column (from activeAuditResult if available)
+      const outlierColValues = {};
+      if (window.activeAuditResult && window.activeAuditResult.issues) {
+        window.activeAuditResult.issues.forEach(iss => {
+          if (iss.category === 'Statistical Outlier') {
+            if (!outlierColValues[iss.column]) outlierColValues[iss.column] = new Set();
+            outlierColValues[iss.column].add(String(iss.originalSnippet));
+          }
+        });
+      }
+
       let html = `<div class="overflow-x-auto"><table class="w-full text-left text-xs border-collapse">
         <thead>
           <tr class="bg-slate-100 border-b-2 border-slate-300 sticky top-0 z-10">
@@ -1925,23 +1948,47 @@ CLEAN_AGENT_LOSS_LIMIT=0.05
         </thead>
         <tbody class="divide-y divide-slate-200 font-mono">`;
 
-      rows.slice(0, 45).forEach((r, rowIdx) => {
-        const rowBg = rowIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40';
-        html += `<tr class="${rowBg} hover:bg-sky-50/30 transition-colors">`;
-        html += `<td class="p-2 text-center text-slate-400 font-mono text-[10px] border-r border-slate-200">${rowIdx + 1}</td>`;
+      rows.slice(0, 200).forEach((r, rowIdx) => {
+        const isDup = dupIndices.has(rowIdx);
+        const rowBg = isDup ? 'bg-amber-50' : rowIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50/40';
+        const rowTitle = isDup ? ' title="⚠ Duplicate row"' : '';
+        html += `<tr class="${rowBg} hover:bg-sky-50/30 transition-colors"${rowTitle}>`;
+        html += `<td class="p-2 text-center text-slate-400 font-mono text-[10px] border-r border-slate-200${isDup ? ' text-amber-500 font-bold' : ''}">${isDup ? '⚠' : rowIdx + 1}</td>`;
         cols.forEach(col => {
           const rawVal = r[col];
           const isNull = rawVal === null || rawVal === undefined || rawVal === '' || String(rawVal).toLowerCase() === 'null';
           const dispVal = isNull ? 'null' : String(rawVal);
-          html += `<td class="p-2.5 border-r border-slate-200 text-slate-800 ${isNull ? 'text-slate-400 italic' : ''} min-w-[110px] max-w-[420px] whitespace-pre-wrap break-words leading-relaxed" data-col="${escapeHtml(col)}">${escapeHtml(dispVal)}</td>`;
+          const isOutlier = !isNull && outlierColValues[col] && outlierColValues[col].has(String(rawVal));
+
+          let cellClass = 'p-2.5 border-r border-slate-200 min-w-[110px] max-w-[420px] whitespace-pre-wrap break-words leading-relaxed';
+          let cellTitle = '';
+          if (isNull) {
+            cellClass += ' bg-rose-50 text-rose-400 italic';
+            cellTitle = ' title="⛔ Null / missing value"';
+          } else if (isDup) {
+            cellClass += ' text-amber-700';
+          } else if (isOutlier) {
+            cellClass += ' bg-orange-50 text-orange-600 font-bold';
+            cellTitle = ` title="📊 Statistical outlier"`;
+          } else {
+            cellClass += ' text-slate-800';
+          }
+          html += `<td class="${cellClass}" data-col="${escapeHtml(col)}"${cellTitle}>${escapeHtml(dispVal)}</td>`;
         });
         html += '</tr>';
       });
 
       html += `</tbody></table></div>`;
-      if (rows.length > 45) {
-        html += `<p class="text-[11px] text-slate-400 text-center py-2 font-mono">Showing first 45 of ${rows.length} rows</p>`;
+      if (rows.length > 200) {
+        html += `<p class="text-[11px] text-slate-400 text-center py-2 font-mono">Showing first 200 of ${rows.length} rows</p>`;
       }
+
+      // Legend
+      html += `<div class="flex items-center gap-4 px-3 py-1.5 bg-slate-50 border-t border-slate-200 text-[10px] font-mono">
+        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-rose-100 border border-rose-300 inline-block"></span>Null</span>
+        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-amber-100 border border-amber-300 inline-block"></span>Duplicate row</span>
+        <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-orange-100 border border-orange-300 inline-block"></span>Outlier</span>
+      </div>`;
 
       currentRawDataset.htmlContent = html;
       currentRawDataset.liveHtml = html;
@@ -2185,9 +2232,14 @@ CLEAN_AGENT_LOSS_LIMIT=0.05
         let numSum = 0;
         let minNum = Infinity;
         let maxNum = -Infinity;
+        const numericValues = [];  // for IQR outlier detection
         let outliersCount = 0;
         let whitespaceCount = 0;
         let ocrTypoCount = 0;
+        // Mixed-type tracking
+        let stringInNumericCount = 0;
+        let stringInNumericExample = null;
+        let stringInNumericRowIdx = Infinity;
         let invalidEmailCount = 0;
         let negativeCount = 0;
 
@@ -2230,6 +2282,7 @@ CLEAN_AGENT_LOSS_LIMIT=0.05
             if (!isNaN(cleanNum)) {
               numCount++;
               numSum += cleanNum;
+              numericValues.push(cleanNum);
               if (cleanNum < minNum) minNum = cleanNum;
               if (cleanNum > maxNum) maxNum = cleanNum;
               if (cleanNum < 0) {
@@ -2250,6 +2303,44 @@ CLEAN_AGENT_LOSS_LIMIT=0.05
         const uniquePct = ((valSet.size / Math.max(1, rowCount)) * 100).toFixed(1);
         const inferredType = numCount > (rowCount * 0.5) ? 'Numeric' : col.toLowerCase().includes('date') ? 'Date' : 'String';
 
+        // ── IQR OUTLIER DETECTION ──────────────────────────────────────────────
+        let outlierExample = null;
+        let outlierRowIdx = Infinity;
+        let outlierLow = null, outlierHigh = null;
+        if (numericValues.length >= 4) {
+          const sorted = [...numericValues].sort((a, b) => a - b);
+          const q1 = sorted[Math.floor(sorted.length * 0.25)];
+          const q3 = sorted[Math.floor(sorted.length * 0.75)];
+          const iqr = q3 - q1;
+          const lowerFence = q1 - 1.5 * iqr;
+          const upperFence = q3 + 1.5 * iqr;
+          outlierLow = lowerFence;
+          outlierHigh = upperFence;
+          rows.forEach((r, rowIdx) => {
+            const v = parseFloat(String(r[col] || '').replace(/[\$,]/g, ''));
+            if (!isNaN(v) && (v < lowerFence || v > upperFence)) {
+              outliersCount++;
+              if (outlierRowIdx === Infinity) { outlierRowIdx = rowIdx; outlierExample = r[col]; }
+            }
+          });
+        }
+
+        // ── MIXED TYPE DETECTION (string in numeric column) ────────────────────
+        if (inferredType === 'Numeric' && numCount > 0) {
+          rows.forEach((r, rowIdx) => {
+            const v = r[col];
+            if (v !== null && v !== undefined && v !== '') {
+              const s = String(v).trim();
+              const asNum = parseFloat(s.replace(/[\$,]/g, ''));
+              // A value in a numeric column that is neither a number nor a null-ish word
+              if (isNaN(asNum) && !/^(null|none|n\/a|blank|undefined|-)$/i.test(s)) {
+                stringInNumericCount++;
+                if (stringInNumericRowIdx === Infinity) { stringInNumericRowIdx = rowIdx; stringInNumericExample = s; }
+              }
+            }
+          });
+        }
+
         // Column Profile
         profile.push({
           column: col,
@@ -2264,6 +2355,8 @@ CLEAN_AGENT_LOSS_LIMIT=0.05
             ocrTypoCount > 0 ? `${ocrTypoCount} OCR letter O typos` : null,
             negativeCount > 0 ? `${negativeCount} negative values` : null,
             invalidEmailCount > 0 ? `${invalidEmailCount} malformed emails` : null,
+            outliersCount > 0 ? `${outliersCount} statistical outliers` : null,
+            stringInNumericCount > 0 ? `${stringInNumericCount} mixed-type values` : null,
             parseFloat(nullPct) > 90 ? 'Extreme Sparsity (>90% Null)' : null
           ].filter(Boolean).join(', ') || 'Clean & Consistent'
         });
@@ -2434,13 +2527,73 @@ CLEAN_AGENT_LOSS_LIMIT=0.05
             }
           });
         }
+
+        // ── IQR OUTLIER ISSUE ─────────────────────────────────────────────────
+        if (outliersCount > 0 && outlierExample !== null) {
+          issues.push({
+            id: issueId++,
+            column: col,
+            problem: `${outliersCount} statistical outlier${outliersCount > 1 ? 's' : ''} detected in [${col}] via IQR method.`,
+            severity: 'Moderate',
+            category: 'Statistical Outlier',
+            originalSnippet: String(outlierExample),
+            replacementSnippet: `[FLAGGED — verify with domain expert]`,
+            what: `Flag ${outliersCount} value${outliersCount > 1 ? 's' : ''} in [${col}] that fall outside the IQR fence [${outlierLow !== null ? outlierLow.toFixed(2) : '?'} – ${outlierHigh !== null ? outlierHigh.toFixed(2) : '?'}].`,
+            why: `Values beyond Q1−1.5×IQR or Q3+1.5×IQR are statistical outliers. May indicate data entry errors, currency formatting issues, or genuine extremes requiring expert review.`,
+            evidence: `IQR-based fence: [${outlierLow !== null ? outlierLow.toFixed(2) : '?'}, ${outlierHigh !== null ? outlierHigh.toFixed(2) : '?'}]. Example outlier: "${outlierExample}" at row ${outlierRowIdx + 1}.`,
+            confidence: 91.0,
+            estimatedLoss: 0.5,
+            risk: 'Medium',
+            reversible: true,
+            status: 'pending',
+            approved: false,
+            customReplacement: null,
+            rowIndex: outlierRowIdx,
+            executeFn: () => {} // outliers require human decision — flag only
+          });
+        }
+
+        // ── MIXED TYPE ISSUE (string in numeric column) ───────────────────────
+        if (stringInNumericCount > 0 && stringInNumericExample !== null) {
+          issues.push({
+            id: issueId++,
+            column: col,
+            problem: `${stringInNumericCount} non-numeric value${stringInNumericCount > 1 ? 's' : ''} in numeric column [${col}]: "${stringInNumericExample}".`,
+            severity: 'Critical',
+            category: 'Type Mismatch',
+            originalSnippet: stringInNumericExample,
+            replacementSnippet: 'null',
+            what: `Null out non-numeric string values in numeric column [${col}] to enforce type schema.`,
+            why: `Column [${col}] is predominantly numeric but contains text values like "${stringInNumericExample}". This causes numeric aggregations (SUM, AVG) to fail silently in analytics pipelines.`,
+            evidence: `${stringInNumericCount} non-parseable string(s) found in a numeric column. Example: "${stringInNumericExample}" at row ${stringInNumericRowIdx + 1}.`,
+            confidence: 96.0,
+            estimatedLoss: 0.1,
+            risk: 'Low',
+            reversible: true,
+            status: 'pending',
+            approved: false,
+            customReplacement: null,
+            rowIndex: stringInNumericRowIdx,
+            executeFn: (r) => {
+              const v = r[col];
+              if (v !== null && v !== undefined && v !== '') {
+                const s = String(v).trim();
+                const asNum = parseFloat(s.replace(/[\$,]/g, ''));
+                if (isNaN(asNum) && !/^(null|none|n\/a|blank|undefined|-)$/i.test(s)) {
+                  r[col] = null;
+                }
+              }
+            }
+          });
+        }
       });
 
-      // ─── DUPLICATE ROW DETECTION ────────────────────────────────────────────────
+      // ─── DUPLICATE ROW DETECTION (case-insensitive + trimmed) ─────────────────
       const seenSignatures = new Map();
       const duplicateRowIndices = [];
 
       rows.forEach((r, idx) => {
+        // Normalise: trim whitespace + lowercase for case-insensitive duplicate matching
         const sig = cols.map(c => {
           const v = r[c];
           return v === null || v === undefined ? '' : String(v).trim().toLowerCase();
@@ -3914,14 +4067,27 @@ CLEAN_AGENT_LOSS_LIMIT=0.05
 
     function exportCleanedCsv() {
       const rows = currentRawDataset.rows;
-      if (!rows.length) return;
-      const headers = Object.keys(rows[0]);
-      const csvContent = [
-        headers.join(','),
-        ...rows.map(r => headers.map(h => `"${String(r[h] || '').replace(/"/g, '""')}"`).join(','))
-      ].join('\n');
+      if (!rows || !rows.length) { alert('No cleaned data to export yet.'); return; }
+      const headers = currentRawDataset.columns && currentRawDataset.columns.length
+        ? currentRawDataset.columns
+        : Object.keys(rows[0]);
 
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const csvLines = [
+        headers.map(h => `"${String(h).replace(/"/g, '""')}"`).join(',')
+      ];
+      rows.forEach(r => {
+        const line = headers.map(h => {
+          const v = r[h];
+          if (v === null || v === undefined) return '';         // nulls as blank
+          const s = String(v).replace(/"/g, '""');
+          // Quote if contains comma, newline or double-quote
+          return (s.includes(',') || s.includes('\n') || s.includes('"')) ? `"${s}"` : s;
+        }).join(',');
+        csvLines.push(line);
+      });
+
+      const csvContent = csvLines.join('\n');
+      const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' }); // BOM for Excel
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
