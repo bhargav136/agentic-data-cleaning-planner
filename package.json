@@ -1,0 +1,25 @@
+{
+  "name": "agentic-data-cleaning-planner",
+  "version": "2.0.0",
+  "description": "Agentic Data Cleaning Planner with Autonomous Audit Engine, IQR Outlier Detection, and Gemini 3.5 Semantic Auditing",
+  "main": "backend/server.js",
+  "scripts": {
+    "start": "node backend/server.js",
+    "dev": "node backend/server.js"
+  },
+  "keywords": [
+    "data-cleaning",
+    "agentic-ai",
+    "gemini",
+    "iqr-outliers",
+    "data-quality",
+    "full-stack"
+  ],
+  "author": "Bhargav",
+  "license": "MIT",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  }
+}

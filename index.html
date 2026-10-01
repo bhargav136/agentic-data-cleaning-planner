@@ -1552,30 +1552,43 @@ EMP-103, Robert O'Connor, robert@company.com, 142, null, Marketing"
     async function callGeminiSemanticAnalysis(textSnippet) {
       if (!textSnippet) return null;
       const key = window.CUSTOM_API_KEY || STORED_API_KEY;
+
+      // 1. Try Backend REST API first (which loads GEMINI_API_KEY from .env)
       try {
-        const prompt = `You are Clean Agent, an enterprise loss-aware autonomous data cleaning AI with specialized lexical and contextual spelling inspection capabilities.
+        const backendRes = await fetch('/api/gemini-audit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sampleText: textSnippet.slice(0, 15000), apiKey: key || undefined })
+        });
+        if (backendRes.ok) {
+          const backendData = await backendRes.json();
+          if (backendData.success && Array.isArray(backendData.findings) && backendData.findings.length > 0) {
+            window._latestGeminiFindings = backendData.findings;
+            return backendData.findings;
+          }
+        }
+      } catch (backendErr) {
+        // Backend not running or in static mode — proceed to direct browser call
+      }
+
+      // 2. Direct browser Gemini API call if key is available in localStorage / UI
+      if (key) {
+        try {
+          const prompt = `You are Clean Agent, an enterprise loss-aware autonomous data cleaning AI with specialized lexical and contextual spelling inspection capabilities.
 Thoroughly inspect this dataset/document excerpt. Detect all data quality issues, paying SPECIAL ATTENTION TO SPELLING MISTAKES:
 
 1. SPELLING & TYPOGRAPHICAL MISTAKES (HIGH PRIORITY):
    - Check every word in text fields, headers, descriptions, departments, job titles, roles, locations, statuses, and notes.
    - Detect misspellings, transposed letters, repeated letters, phonetic typos, or missing characters.
-   - Examples of typos to catch:
-     * Department & Business: "Enginering" -> "Engineering", "Markting" -> "Marketing", "Fianance" -> "Finance", "Acountng" -> "Accounting", "Human Resorces" -> "Human Resources", "Oprations" -> "Operations", "Managment" -> "Management", "Logistcs" -> "Logistics"
-     * Job Roles: "Manger" -> "Manager", "Develper" -> "Developer", "Anlyst" -> "Analyst", "Directer" -> "Director", "Cordinator" -> "Coordinator", "Consultnt" -> "Consultant", "Assitant" -> "Assistant"
-     * Statuses & Actions: "Complted" -> "Completed", "Pendng" -> "Pending", "Apprvd" -> "Approved", "Inactiv" -> "Inactive", "Procesing" -> "Processing", "Canceld" -> "Canceled", "Succesful" -> "Successful"
-     * General English typos: "Summery" -> "Summary", "yeear" -> "year", "Definitly" -> "Definitely", "Recieved" -> "Received", "Occured" -> "Occurred", "Seprate" -> "Separate", "Goverment" -> "Government", "Calfornia" -> "California", "Londn" -> "London"
    - Category MUST be "Spelling Mistake".
 
-2. Non-standard, inconsistent or ambiguous dates (e.g., "12/05/23" -> "2023-12-05", dates with spaced hyphens "2023 - 12 - 05").
-3. Negative or impossible constraints (e.g. biological age negative "Age = - 4" -> "4", out-of-range ages like 145).
-4. Inconsistent entity/customer names (e.g., "Maya C." -> "Maya Chen", all-caps names with extra whitespace).
-5. OCR character substitution typos (e.g. letter "O" used instead of digit "0", like "$75,OOO", "O -> 0", "$3,87O").
-6. Malformed email domain syntax (e.g. consecutive dots "..com", missing "@").
-7. Missing/corrupted data tokens (e.g., "NaN", unhandled "null", blank required fields).
-8. Spreadsheet formula injections (e.g., "=cmd|", "=calc", "=HYPERLINK").
+2. Non-standard, inconsistent or ambiguous dates (e.g., "12/05/23" -> "2023-12-05").
+3. Negative or impossible constraints (e.g. biological age negative "Age = - 4" -> "4").
+4. OCR character substitution typos (e.g. letter "O" used instead of digit "0", like "$75,OOO").
+5. Malformed email domain syntax (e.g. consecutive dots "..com", missing "@").
 
 CRITICAL REQUIREMENT:
-For each issue, "original" MUST be the EXACT, short substring as it literally appears in the text so it can be found and highlighted with wavy underlines. Do NOT return the entire paragraph or row as the "original".
+For each issue, "original" MUST be the EXACT substring in the text.
 "replacement" must be the clean, corrected value.
 
 Respond with ONLY a valid JSON array of objects:
@@ -1594,32 +1607,33 @@ Respond with ONLY a valid JSON array of objects:
 Data to analyze:
 ${textSnippet.slice(0, 15000)}`;
 
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 9000);
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 9000);
 
-        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${key}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal: controller.signal,
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { responseMimeType: 'application/json' }
-          })
-        });
-        clearTimeout(timeoutId);
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${key}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: controller.signal,
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt }] }],
+              generationConfig: { responseMimeType: 'application/json' }
+            })
+          });
+          clearTimeout(timeoutId);
 
-        const data = await response.json();
-        const parts = data.candidates?.[0]?.content?.parts || [];
-        const text = parts.map(p => p.text || '').join('');
-        if (text) {
-          const parsed = JSON.parse(text);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            window._latestGeminiFindings = parsed;
-            return parsed;
+          const data = await response.json();
+          const parts = data.candidates?.[0]?.content?.parts || [];
+          const text = parts.map(p => p.text || '').join('');
+          if (text) {
+            const parsed = JSON.parse(text);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              window._latestGeminiFindings = parsed;
+              return parsed;
+            }
           }
+        } catch (err) {
+          console.warn('Gemini direct API call error, falling back to local audit engine.', err);
         }
-      } catch (err) {
-        console.warn('Gemini 3.5 Flash offline/timeout, seamlessly activating fast local pattern engine.', err);
       }
       return null;
     }
