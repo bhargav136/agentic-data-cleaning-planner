@@ -94,6 +94,9 @@ function applyFieldTransform(row, col, target, replacement, actionType) {
   }
 
   const strVal = String(val);
+  // Only transform if this field matches target or is the targeted null
+  const isMatch = (target !== undefined && target !== null && (strVal === String(target) || strVal.includes(String(target))));
+  if (!isMatch) return;
 
   switch (actionType) {
     case 'trim_whitespace':
@@ -113,22 +116,34 @@ function applyFieldTransform(row, col, target, replacement, actionType) {
       row[col] = strVal.replace(/\.\./g, '.');
       break;
 
-    case 'median_impute':
-      if (val === null || strVal === 'null' || strVal === '') {
-        row[col] = replacement;
-      }
-      break;
-
+    case 'clear_invalid_date':
+    case 'clear_formula_error':
+    case 'clear_negative_quantity':
+    case 'clear_negative_amount':
     case 'null_invalid_numeric':
-      const numTest = parseFloat(strVal.replace(/[\$,]/g, ''));
-      if (isNaN(numTest) && !/^(null|none|n\/a|blank|undefined|-)$/i.test(strVal)) {
-        row[col] = null;
-      }
+      row[col] = null;
       break;
 
+    case 'convert_number_word':
+    case 'sanitize_currency':
+    case 'extract_clean_numeric':
+    case 'recompute_total_product':
+    case 'correct_arithmetic_discrepancy':
+      const parsedNum = parseFloat(replacement);
+      row[col] = !isNaN(parsedNum) ? parsedNum : replacement;
+      break;
+
+    case 'standardize_id_prefix':
+    case 'normalize_date_iso':
+    case 'deobfuscate_email':
+    case 'lowercase_email':
+    case 'convert_title_case':
+    case 'standardize_placeholder_nan':
     case 'correct_spelling':
     default:
-      if (target && strVal === String(target)) {
+      if (replacement === 'null' || replacement === null) {
+        row[col] = null;
+      } else if (target && strVal === String(target)) {
         row[col] = replacement;
       } else if (target && strVal.includes(String(target))) {
         row[col] = strVal.split(String(target)).join(replacement);

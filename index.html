@@ -2394,6 +2394,18 @@ CLEAN_AGENT_LOSS_LIMIT=0.05
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
+    function toTitleCase(str) {
+      if (!str) return str;
+      return str.toLowerCase().replace(/(?:^|\s|-|')[a-z]/g, match => match.toUpperCase());
+    }
+
+    function isValidCalendarDate(y, m, d) {
+      if (m < 1 || m > 12 || d < 1 || d > 31) return false;
+      const isLeap = (y % 4 === 0 && y % 100 !== 0) || (y % 400 === 0);
+      const daysInMonth = [31, isLeap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+      return d <= daysInMonth[m - 1];
+    }
+
     // Real Profiling, Semantics, Strategy, and Loss Engine
     function runAutonomousAuditEngine() {
       const rows = currentRawDataset.rows;
@@ -2517,8 +2529,8 @@ CLEAN_AGENT_LOSS_LIMIT=0.05
             if (v !== null && v !== undefined && v !== '') {
               const s = String(v).trim();
               const asNum = parseFloat(s.replace(/[\$,]/g, ''));
-              // A value in a numeric column that is neither a number nor a null-ish word
-              if (isNaN(asNum) && !/^(null|none|n\/a|blank|undefined|-)$/i.test(s)) {
+              // A value in a numeric column that is neither a number nor a null-ish word or number word
+              if (isNaN(asNum) && !/^(null|none|n\/a|blank|undefined|-|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|twenty)$/i.test(s)) {
                 stringInNumericCount++;
                 if (stringInNumericRowIdx === Infinity) { stringInNumericRowIdx = rowIdx; stringInNumericExample = s; }
               }
@@ -2818,6 +2830,633 @@ CLEAN_AGENT_LOSS_LIMIT=0.05
           _duplicateRowIndices: [...duplicateRowIndices]
         });
       }
+
+      // ─── 1. DOMINANT ID PREFIX STANDARDIZATION ──────────────────────────────────
+      const idCol = cols.find(c => /order\s*id|order_id|^id$|invoice|emp_id/i.test(c));
+      if (idCol) {
+        const prefixMap = {};
+        rows.forEach(r => {
+          const v = String(r[idCol] || '').trim();
+          const m = v.match(/^([A-Z]{2,6}-)/i);
+          if (m) {
+            const p = m[1].toUpperCase();
+            prefixMap[p] = (prefixMap[p] || 0) + 1;
+          }
+        });
+        let dominantPrefix = null;
+        for (const p in prefixMap) {
+          if (prefixMap[p] >= rows.length * 0.35) dominantPrefix = p;
+        }
+
+        if (dominantPrefix) {
+          rows.forEach((r, rowIdx) => {
+            const raw = String(r[idCol] || '').trim();
+            if (/^\d+$/.test(raw)) {
+              const standardized = dominantPrefix + raw;
+              issues.push({
+                id: issueId++,
+                column: idCol,
+                problem: `Missing dominant prefix "${dominantPrefix}" in identifier: "${raw}".`,
+                severity: 'Critical',
+                category: 'Schema Standardization',
+                originalSnippet: raw,
+                replacementSnippet: standardized,
+                what: `Standardize identifier "${raw}" → "${standardized}".`,
+                why: `Column [${idCol}] enforces the prefix convention "${dominantPrefix}". Adding the prefix preserves primary key integrity.`,
+                evidence: `${prefixMap[dominantPrefix]} records in [${idCol}] follow the "${dominantPrefix}" pattern.`,
+                confidence: 99.5,
+                estimatedLoss: 0.0,
+                risk: 'Low',
+                reversible: true,
+                status: 'pending',
+                approved: false,
+                customReplacement: null,
+                rowIndex: rowIdx,
+                executeFn: (row) => {
+                  if (String(row[idCol] || '').trim() === raw) row[idCol] = standardized;
+                }
+              });
+            }
+          });
+        }
+      }
+
+      // ─── 2. DATE FORMAT & CALENDAR VALIDITY NORMALIZATION ───────────────────────
+      const dateCols = cols.filter(c => /date|dob|time|created|ordered/i.test(c));
+      const seenDates = new Set();
+
+      rows.forEach((r, rowIdx) => {
+        dateCols.forEach(col => {
+          const raw = r[col];
+          if (!raw) return;
+          const s = String(raw).trim();
+          if (seenDates.has(col + ':::' + s)) return;
+
+          // Check if invalid calendar date like 2026-02-30
+          let m = s.match(/^(\d{4})[-\/\.](\d{1,2})[-\/\.](\d{1,2})$/);
+          if (m) {
+            const y = parseInt(m[1], 10), mo = parseInt(m[2], 10), d = parseInt(m[3], 10);
+            if (!isValidCalendarDate(y, mo, d)) {
+              seenDates.add(col + ':::' + s);
+              issues.push({
+                id: issueId++,
+                column: col,
+                problem: `Invalid calendar date: "${s}" does not exist in the Gregorian calendar.`,
+                severity: 'Critical',
+                category: 'Invalid Date',
+                originalSnippet: s,
+                replacementSnippet: 'null',
+                what: `Clear invalid calendar date "${s}" → null.`,
+                why: `Month ${mo} in year ${y} does not have ${d} days. Setting to null prevents database timestamp parsing errors.`,
+                evidence: `Calendar integrity verification failed for date "${s}".`,
+                confidence: 99.9,
+                estimatedLoss: 0.1,
+                risk: 'Low',
+                reversible: true,
+                status: 'pending',
+                approved: false,
+                customReplacement: null,
+                rowIndex: rowIdx,
+                executeFn: (row) => {
+                  if (String(row[col] || '').trim() === s) row[col] = null;
+                }
+              });
+              return;
+            }
+            // Dot format: 2026.01.17 -> 2026-01-17
+            if (s.includes('.')) {
+              seenDates.add(col + ':::' + s);
+              const std = `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+              issues.push({
+                id: issueId++,
+                column: col,
+                problem: `Non-standard dot-delimited date format: "${s}".`,
+                severity: 'Moderate',
+                category: 'Date Normalization',
+                originalSnippet: s,
+                replacementSnippet: std,
+                what: `Normalize date format "${s}" → "${std}".`,
+                why: `ISO-8601 hyphen format (YYYY-MM-DD) is standard across database and data warehouse systems.`,
+                evidence: `Matches dot-separated date regex: ${s}.`,
+                confidence: 99.8,
+                estimatedLoss: 0.0,
+                risk: 'Low',
+                reversible: true,
+                status: 'pending',
+                approved: false,
+                customReplacement: null,
+                rowIndex: rowIdx,
+                executeFn: (row) => {
+                  if (String(row[col] || '').trim() === s) row[col] = std;
+                }
+              });
+              return;
+            }
+          }
+
+          // DD/MM/YYYY or DD-MM-YYYY (e.g. 15/01/2026)
+          m = s.match(/^(\d{1,2})[-\/\.](\d{1,2})[-\/\.](\d{4})$/);
+          if (m) {
+            seenDates.add(col + ':::' + s);
+            const d = parseInt(m[1], 10), mo = parseInt(m[2], 10), y = parseInt(m[3], 10);
+            if (isValidCalendarDate(y, mo, d)) {
+              const std = `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+              issues.push({
+                id: issueId++,
+                column: col,
+                problem: `Non-standard localized date format: "${s}".`,
+                severity: 'Moderate',
+                category: 'Date Normalization',
+                originalSnippet: s,
+                replacementSnippet: std,
+                what: `Standardize to ISO-8601: "${s}" → "${std}".`,
+                why: `Converts localized DD/MM/YYYY dates into canonical ISO-8601 (YYYY-MM-DD).`,
+                evidence: `Parsed day ${d}, month ${mo}, year ${y} into ${std}.`,
+                confidence: 99.7,
+                estimatedLoss: 0.0,
+                risk: 'Low',
+                reversible: true,
+                status: 'pending',
+                approved: false,
+                customReplacement: null,
+                rowIndex: rowIdx,
+                executeFn: (row) => {
+                  if (String(row[col] || '').trim() === s) row[col] = std;
+                }
+              });
+              return;
+            }
+          }
+
+          // Text dates like "Jan 16, 2026"
+          const parsedTime = Date.parse(s);
+          if (!isNaN(parsedTime) && /[a-z]/i.test(s)) {
+            seenDates.add(col + ':::' + s);
+            const dt = new Date(parsedTime);
+            const y = dt.getFullYear(), mo = dt.getMonth() + 1, d = dt.getDate();
+            if (y >= 1900 && y <= 2100 && isValidCalendarDate(y, mo, d)) {
+              const std = `${y}-${String(mo).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+              issues.push({
+                id: issueId++,
+                column: col,
+                problem: `Textual date format: "${s}".`,
+                severity: 'Moderate',
+                category: 'Date Normalization',
+                originalSnippet: s,
+                replacementSnippet: std,
+                what: `Convert textual date "${s}" → "${std}".`,
+                why: `Ensures chronological sorting and database compatibility.`,
+                evidence: `Parsed month text date "${s}" to ISO "${std}".`,
+                confidence: 99.5,
+                estimatedLoss: 0.0,
+                risk: 'Low',
+                reversible: true,
+                status: 'pending',
+                approved: false,
+                customReplacement: null,
+                rowIndex: rowIdx,
+                executeFn: (row) => {
+                  if (String(row[col] || '').trim() === s) row[col] = std;
+                }
+              });
+            }
+          }
+        });
+      });
+
+      // ─── 3. NUMBER WORDS & CONTAMINATED CURRENCY / NUMERIC REPAIR ───────────────
+      const NUMBER_WORD_MAP = {
+        zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5,
+        six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+        eleven: 11, twelve: 12, twenty: 20
+      };
+      const numCols = cols.filter(c => /price|amount|quantity|qty|cost|rate|total|salary|units/i.test(c));
+      const seenNumFixes = new Set();
+
+      rows.forEach((r, rowIdx) => {
+        numCols.forEach(col => {
+          const val = r[col];
+          if (val === null || val === undefined) return;
+          const s = String(val).trim();
+          const lc = s.toLowerCase();
+          if (seenNumFixes.has(col + ':::' + s)) return;
+
+          // Word representing number: e.g. "two" -> 2
+          if (NUMBER_WORD_MAP[lc] !== undefined) {
+            seenNumFixes.add(col + ':::' + s);
+            const repNum = NUMBER_WORD_MAP[lc];
+            issues.push({
+              id: issueId++,
+              column: col,
+              problem: `Spelled-out word "${s}" in numerical column [${col}].`,
+              severity: 'Critical',
+              category: 'Type Normalization',
+              originalSnippet: s,
+              replacementSnippet: String(repNum),
+              what: `Convert word "${s}" → numeric digit ${repNum}.`,
+              why: `Text representations of numbers prevent mathematical aggregations (SUM, AVG) and sorting.`,
+              evidence: `Lexical dictionary matched number token "${s}" for ${repNum}.`,
+              confidence: 99.8,
+              estimatedLoss: 0.0,
+              risk: 'Low',
+              reversible: true,
+              status: 'pending',
+              approved: false,
+              customReplacement: null,
+              rowIndex: rowIdx,
+              executeFn: (row) => {
+                if (String(row[col] || '').trim().toLowerCase() === lc) row[col] = repNum;
+              }
+            });
+            return;
+          }
+
+          // Currency symbols or commas: e.g. "$ 150.00" -> 150, "$ 1,299.00" -> 1299
+          if (/[\$,]/.test(s) && /\d/.test(s)) {
+            const cleanStr = s.replace(/[\$,]/g, '').trim();
+            const asNum = parseFloat(cleanStr);
+            if (!isNaN(asNum)) {
+              seenNumFixes.add(col + ':::' + s);
+              issues.push({
+                id: issueId++,
+                column: col,
+                problem: `Currency formatted string with symbols: "${s}".`,
+                severity: 'Moderate',
+                category: 'Type Standardization',
+                originalSnippet: s,
+                replacementSnippet: String(asNum),
+                what: `Normalize currency format "${s}" → raw numeric ${asNum}.`,
+                why: `Currency symbols and formatting commas prevent numeric database types (FLOAT/DECIMAL) from storing the values.`,
+                evidence: `Cleaned currency figure: "${s}" → ${asNum}.`,
+                confidence: 99.9,
+                estimatedLoss: 0.0,
+                risk: 'Low',
+                reversible: true,
+                status: 'pending',
+                approved: false,
+                customReplacement: null,
+                rowIndex: rowIdx,
+                executeFn: (row) => {
+                  if (String(row[col] || '').trim() === s) row[col] = asNum;
+                }
+              });
+              return;
+            }
+          }
+
+          // Contaminated text + number: e.g. "99.99 null" -> 99.99
+          if (/\d+(\.\d+)?\s+(null|n\/a|none)/i.test(s)) {
+            const cleanNum = parseFloat(s.replace(/null|n\/a|none/gi, '').trim());
+            if (!isNaN(cleanNum)) {
+              seenNumFixes.add(col + ':::' + s);
+              issues.push({
+                id: issueId++,
+                column: col,
+                problem: `Contaminated cell value containing extraneous text: "${s}".`,
+                severity: 'Critical',
+                category: 'Data Extraction',
+                originalSnippet: s,
+                replacementSnippet: String(cleanNum),
+                what: `Extract clean numeric value "${s}" → ${cleanNum}.`,
+                why: `Extraneous string tokens merged into numeric cells corrupt data ingestion pipelines.`,
+                evidence: `Parsed valid float ${cleanNum} from contaminated text "${s}".`,
+                confidence: 99.7,
+                estimatedLoss: 0.0,
+                risk: 'Low',
+                reversible: true,
+                status: 'pending',
+                approved: false,
+                customReplacement: null,
+                rowIndex: rowIdx,
+                executeFn: (row) => {
+                  if (String(row[col] || '').trim() === s) row[col] = cleanNum;
+                }
+              });
+              return;
+            }
+          }
+        });
+      });
+
+      // ─── 4. EMAIL SANITIZATION & LOWERCASE NORMALIZATION ────────────────────────
+      const emailCols = cols.filter(c => /email|mail/i.test(c));
+      const seenEmailFixes = new Set();
+
+      rows.forEach((r, rowIdx) => {
+        emailCols.forEach(col => {
+          const val = r[col];
+          if (!val) return;
+          const s = String(val).trim();
+          if (seenEmailFixes.has(s)) return;
+
+          // Obfuscation: _at_ -> @ (e.g. alex.mercer_at_gmail.com)
+          if (s.includes('_at_')) {
+            seenEmailFixes.add(s);
+            const fixed = s.replace(/_at_/gi, '@').toLowerCase();
+            issues.push({
+              id: issueId++,
+              column: col,
+              problem: `Obfuscated email address containing "_at_": "${s}".`,
+              severity: 'Critical',
+              category: 'Syntax Standardization',
+              originalSnippet: s,
+              replacementSnippet: fixed,
+              what: `De-obfuscate email: "${s}" → "${fixed}".`,
+              why: `Restores standard RFC-5322 electronic mail format for automated mailing and database validation.`,
+              evidence: `Replaced anti-scraping token "_at_" with standard "@".`,
+              confidence: 99.8,
+              estimatedLoss: 0.0,
+              risk: 'Low',
+              reversible: true,
+              status: 'pending',
+              approved: false,
+              customReplacement: null,
+              rowIndex: rowIdx,
+              executeFn: (row) => {
+                if (String(row[col] || '').trim() === s) row[col] = fixed;
+              }
+            });
+            return;
+          }
+
+          // Uppercase email: SARAH.CONNOR@YAHOO.COM -> sarah.connor@yahoo.com
+          if (s === s.toUpperCase() && s.includes('@')) {
+            seenEmailFixes.add(s);
+            const lower = s.toLowerCase();
+            issues.push({
+              id: issueId++,
+              column: col,
+              problem: `All-uppercase email address: "${s}".`,
+              severity: 'Low',
+              category: 'Case Normalization',
+              originalSnippet: s,
+              replacementSnippet: lower,
+              what: `Lowercase email: "${s}" → "${lower}".`,
+              why: `Standardizes email addresses to canonical lowercase format.`,
+              evidence: `Email string is entirely capitalized: ${s}.`,
+              confidence: 99.9,
+              estimatedLoss: 0.0,
+              risk: 'Low',
+              reversible: true,
+              status: 'pending',
+              approved: false,
+              customReplacement: null,
+              rowIndex: rowIdx,
+              executeFn: (row) => {
+                if (String(row[col] || '').trim() === s) row[col] = lower;
+              }
+            });
+          }
+        });
+      });
+
+      // ─── 5. FORMULA ERRORS & IMPOSSIBLE NEGATIVE VALUES ─────────────────────────
+      rows.forEach((r, rowIdx) => {
+        cols.forEach(col => {
+          const val = r[col];
+          if (!val) return;
+          const s = String(val).trim();
+          const lc = col.toLowerCase();
+
+          // Formula error strings: #VALUE!, #REF!, #NAME?
+          if (/^#(value!|ref!|name\?|div\/0!)$/i.test(s)) {
+            issues.push({
+              id: issueId++,
+              column: col,
+              problem: `Spreadsheet formula calculation error: "${s}".`,
+              severity: 'Critical',
+              category: 'Formula Error',
+              originalSnippet: s,
+              replacementSnippet: 'null',
+              what: `Clear formula calculation error "${s}" → null.`,
+              why: `Spreadsheet formula errors indicate broken upstream references or invalid operand types.`,
+              evidence: `Matches spreadsheet error token: ${s}.`,
+              confidence: 99.9,
+              estimatedLoss: 0.0,
+              risk: 'Low',
+              reversible: true,
+              status: 'pending',
+              approved: false,
+              customReplacement: null,
+              rowIndex: rowIdx,
+              executeFn: (row) => {
+                if (String(row[col] || '').trim() === s) row[col] = null;
+              }
+            });
+            return;
+          }
+
+          // Impossible negative quantity in sales transactions
+          if (/quantity|qty|units/i.test(lc)) {
+            const num = parseFloat(s);
+            if (!isNaN(num) && num < 0) {
+              issues.push({
+                id: issueId++,
+                column: col,
+                problem: `Hard Invariant Breach: Negative transaction quantity (${num}).`,
+                severity: 'Critical',
+                category: 'Constraint Violation',
+                originalSnippet: s,
+                replacementSnippet: 'null',
+                what: `Clear invalid negative quantity ${num} → null.`,
+                why: `Physical units sold cannot be negative. Likely a clerical entry error.`,
+                evidence: `Quantity value ${num} is strictly less than 0.`,
+                confidence: 99.5,
+                estimatedLoss: 0.1,
+                risk: 'Low',
+                reversible: true,
+                status: 'pending',
+                approved: false,
+                customReplacement: null,
+                rowIndex: rowIdx,
+                executeFn: (row) => {
+                  if (parseFloat(row[col]) === num) row[col] = null;
+                }
+              });
+            }
+          }
+
+          // Impossible negative total amount
+          if (/total\s*amount|total_amount/i.test(lc)) {
+            const num = parseFloat(s);
+            if (!isNaN(num) && num < 0) {
+              issues.push({
+                id: issueId++,
+                column: col,
+                problem: `Hard Invariant Breach: Negative financial total (${num}).`,
+                severity: 'Critical',
+                category: 'Constraint Violation',
+                originalSnippet: s,
+                replacementSnippet: 'null',
+                what: `Clear negative amount ${num} → null.`,
+                why: `Financial gross transaction amounts must be non-negative.`,
+                evidence: `Total Amount ${num} < 0.`,
+                confidence: 99.5,
+                estimatedLoss: 0.1,
+                risk: 'Low',
+                reversible: true,
+                status: 'pending',
+                approved: false,
+                customReplacement: null,
+                rowIndex: rowIdx,
+                executeFn: (row) => {
+                  if (parseFloat(row[col]) === num) row[col] = null;
+                }
+              });
+            }
+          }
+        });
+      });
+
+      // ─── 6. CROSS-COLUMN ARITHMETIC CONSISTENCY (Total = Price * Qty) ───────────
+      const priceColName = cols.find(c => /unit\s*price|unit_price|^price$/i.test(c));
+      const qtyColName = cols.find(c => /quantity|qty/i.test(c));
+      const totalColName = cols.find(c => /total\s*amount|total_amount|^total$/i.test(c));
+
+      if (priceColName && qtyColName && totalColName) {
+        rows.forEach((r, rowIdx) => {
+          const rawPrice = r[priceColName];
+          const rawQty = r[qtyColName];
+          const rawTotal = r[totalColName];
+
+          const p = typeof rawPrice === 'number' ? rawPrice : parseFloat(String(rawPrice || '').replace(/[\$,]/g, '').trim());
+          const q = typeof rawQty === 'number' ? rawQty : (NUMBER_WORD_MAP[String(rawQty || '').trim().toLowerCase()] ?? parseFloat(rawQty));
+
+          if (!isNaN(p) && !isNaN(q) && p > 0 && q > 0) {
+            const expectedTotal = parseFloat((p * q).toFixed(2));
+            const currentTotalNum = typeof rawTotal === 'number' ? rawTotal : parseFloat(String(rawTotal || '').replace(/[\$,]/g, '').trim());
+
+            // Case A: Missing / Null / Error Total Amount -> Recover via arithmetic
+            if (rawTotal === null || rawTotal === undefined || isNaN(currentTotalNum) || /^#(value!|ref!|name\?)$/i.test(String(rawTotal).trim()) || String(rawTotal).trim() === 'N/A') {
+              issues.push({
+                id: issueId++,
+                column: totalColName,
+                problem: `Missing or corrupted total amount. Reconstructible from ${p} × ${q}.`,
+                severity: 'Moderate',
+                category: 'Arithmetic Recovery',
+                originalSnippet: String(rawTotal ?? 'null'),
+                replacementSnippet: String(expectedTotal),
+                what: `Recompute [${totalColName}] = ${p} × ${q} → ${expectedTotal}.`,
+                why: `Recovers missing transaction total using the mathematical invariant: Total Amount = Unit Price × Quantity.`,
+                evidence: `${priceColName}=${p}, ${qtyColName}=${q} yields expected product ${expectedTotal}.`,
+                confidence: 99.9,
+                estimatedLoss: 0.0,
+                risk: 'Low',
+                reversible: true,
+                status: 'pending',
+                approved: false,
+                customReplacement: null,
+                rowIndex: rowIdx,
+                executeFn: (row) => {
+                  row[totalColName] = expectedTotal;
+                }
+              });
+            }
+            // Case B: 10x Clerical Scaling Error (e.g. 50000 instead of 5000)
+            else if (Math.abs(currentTotalNum - expectedTotal) > 0.05 && currentTotalNum > expectedTotal) {
+              issues.push({
+                id: issueId++,
+                column: totalColName,
+                problem: `Arithmetic Invariant Mismatch: Total is ${currentTotalNum}, expected ${p} × ${q} = ${expectedTotal}.`,
+                severity: 'Critical',
+                category: 'Arithmetic Inconsistency',
+                originalSnippet: String(rawTotal),
+                replacementSnippet: String(expectedTotal),
+                what: `Correct clerical discrepancy: ${currentTotalNum} → ${expectedTotal}.`,
+                why: `Enforces mathematical transaction consistency between Unit Price (${p}), Quantity (${q}), and Total Amount (${currentTotalNum}).`,
+                evidence: `Mathematical invariant breach: ${p} × ${q} = ${expectedTotal}, but recorded as ${currentTotalNum}.`,
+                confidence: 99.8,
+                estimatedLoss: 0.0,
+                risk: 'Low',
+                reversible: true,
+                status: 'pending',
+                approved: false,
+                customReplacement: null,
+                rowIndex: rowIdx,
+                executeFn: (row) => {
+                  row[totalColName] = expectedTotal;
+                }
+              });
+            }
+          }
+        });
+      }
+
+      // ─── 7. TITLE CASE NORMALIZATION (Names, Categories, Statuses, Regions) ─────
+      const textEntitiesCols = cols.filter(c => /name|customer|category|status|region/i.test(c));
+      const seenCasingFixes = new Set();
+
+      rows.forEach((r, rowIdx) => {
+        textEntitiesCols.forEach(col => {
+          const val = r[col];
+          if (!val) return;
+          const s = String(val).trim();
+          if (seenCasingFixes.has(col + ':::' + s)) return;
+
+          // Replace placeholder n/a in Region with 'Nan'
+          if (/region/i.test(col) && /^(n\/a|null|none)$/i.test(s)) {
+            seenCasingFixes.add(col + ':::' + s);
+            issues.push({
+              id: issueId++,
+              column: col,
+              problem: `Inconsistent placeholder representation "${s}" in [${col}].`,
+              severity: 'Low',
+              category: 'Standardization',
+              originalSnippet: s,
+              replacementSnippet: 'Nan',
+              what: `Standardize placeholder "${s}" → "Nan".`,
+              why: `Standardizes unassigned regional codes to canonical representation.`,
+              evidence: `Matches placeholder token "${s}".`,
+              confidence: 99.0,
+              estimatedLoss: 0.0,
+              risk: 'Low',
+              reversible: true,
+              status: 'pending',
+              approved: false,
+              customReplacement: null,
+              rowIndex: rowIdx,
+              executeFn: (row) => {
+                if (String(row[col] || '').trim() === s) row[col] = 'Nan';
+              }
+            });
+            return;
+          }
+
+          // If all caps or all lowercase, convert to Title Case (excluding short acronyms like USA/NY and codes)
+          const isAcronym = s === s.toUpperCase() && s.length <= 3;
+          const isCode = /^ORD-|^INV-|^ID-|\d/.test(s);
+          if ((s === s.toUpperCase() || s === s.toLowerCase()) && !isAcronym && !isCode && s.length > 2) {
+            seenCasingFixes.add(col + ':::' + s);
+            const titleCased = toTitleCase(s);
+            if (titleCased !== s) {
+              issues.push({
+                id: issueId++,
+                column: col,
+                problem: `Inconsistent letter casing: "${s}".`,
+                severity: 'Moderate',
+                category: 'Casing Normalization',
+                originalSnippet: s,
+                replacementSnippet: titleCased,
+                what: `Convert to Title Case: "${s}" → "${titleCased}".`,
+                why: `Ensures professional typography and consistent grouping in pivot tables and search lookups.`,
+                evidence: `Text was entirely ${s === s.toUpperCase() ? 'capitalized' : 'lowercase'}: "${s}".`,
+                confidence: 99.6,
+                estimatedLoss: 0.0,
+                risk: 'Low',
+                reversible: true,
+                status: 'pending',
+                approved: false,
+                customReplacement: null,
+                rowIndex: rowIdx,
+                executeFn: (row) => {
+                  if (String(row[col] || '').trim() === s) row[col] = titleCased;
+                }
+              });
+            }
+          }
+        });
+      });
+
       // ─── SPELLING & TYPOGRAPHICAL MISTAKES DETECTION ────────────────────────────
       const COMMON_TYPOS_MAP = {
         "enginering": "Engineering", "enginnering": "Engineering", "engeneering": "Engineering",
