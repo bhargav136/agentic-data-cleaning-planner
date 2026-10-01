@@ -487,6 +487,39 @@
       0% { transform: rotate(14deg) translateY(0px) scale(1); }
       100% { transform: rotate(12deg) translateY(15px) scale(1.02); }
     }
+    /* ── Data Fullscreen Overlay ───────────────────────────────────────── */
+    .data-fullscreen-active {
+      position: fixed !important;
+      inset: 0 !important;
+      z-index: 9999 !important;
+      background: rgba(248, 250, 252, 0.97) !important;
+      backdrop-filter: blur(20px) !important;
+      -webkit-backdrop-filter: blur(20px) !important;
+      border-radius: 0 !important;
+      display: flex;
+      flex-direction: column;
+      padding: 0 !important;
+      box-shadow: none !important;
+    }
+    .data-fullscreen-inner {
+      flex: 1 !important;
+      max-height: none !important;
+      height: 100% !important;
+      overflow: auto !important;
+      border-radius: 0 !important;
+    }
+    .data-fullscreen-active #fsBtn-grammarlyDocPaper,
+    .data-fullscreen-active #fsBtn-tableViewDataPreview {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 10000;
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      font-size: 18px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.18);
+    }
   </style>
 </head>
 <body class="bg-[#f8fafc] text-slate-800 font-sans antialiased min-h-screen flex flex-col selection:bg-sky-100 selection:text-sky-900 relative">
@@ -994,8 +1027,18 @@ EMP-103, Robert O'Connor, robert@company.com, 142, null, Marketing"
             </div>
 
             <!-- Paper Sheet Canvas -->
-            <div class="paper-doc-sheet rounded-2xl p-6 sm:p-8 min-h-[500px] max-h-[720px] overflow-y-auto font-sans leading-relaxed text-slate-800 text-sm relative border border-slate-200" id="grammarlyDocPaper">
-              <!-- Rendered dynamically with live text and interactive Grammarly underlines -->
+            <div class="relative" id="grammarlyDocPaperWrap">
+              <div class="paper-doc-sheet rounded-2xl p-6 sm:p-8 min-h-[500px] max-h-[720px] overflow-y-auto font-sans leading-relaxed text-slate-800 text-sm relative border border-slate-200" id="grammarlyDocPaper">
+                <!-- Rendered dynamically with live text and interactive Grammarly underlines -->
+              </div>
+              <!-- Fullscreen Button -->
+              <button
+                type="button"
+                onclick="toggleDataFullscreen('grammarlyDocPaperWrap','grammarlyDocPaper')"
+                id="fsBtn-grammarlyDocPaper"
+                title="Toggle fullscreen"
+                class="absolute bottom-3 right-3 z-20 w-8 h-8 flex items-center justify-center rounded-lg bg-white/80 backdrop-blur-sm border border-slate-200 text-slate-500 hover:text-slate-800 hover:bg-white hover:shadow-md transition-all text-base"
+              >⛶</button>
             </div>
 
             <!-- Helper Notice below Paper -->
@@ -1089,8 +1132,18 @@ EMP-103, Robert O'Connor, robert@company.com, 142, null, Marketing"
               <span class="text-xs font-bold text-slate-700">📊 Dataset Preview</span>
               <span class="text-[11px] text-slate-400 font-mono" id="tableViewRowCount"></span>
             </div>
-            <div class="overflow-x-auto max-h-64" id="tableViewDataPreview">
-              <!-- Populated dynamically -->
+            <div class="relative" id="tableViewDataWrap">
+              <div class="overflow-x-auto max-h-64" id="tableViewDataPreview">
+                <!-- Populated dynamically -->
+              </div>
+              <!-- Fullscreen Button -->
+              <button
+                type="button"
+                onclick="toggleDataFullscreen('tableViewDataWrap','tableViewDataPreview')"
+                id="fsBtn-tableViewDataPreview"
+                title="Toggle fullscreen"
+                class="absolute bottom-2 right-2 z-20 w-8 h-8 flex items-center justify-center rounded-lg bg-white/80 backdrop-blur-sm border border-slate-200 text-slate-500 hover:text-slate-800 hover:bg-white hover:shadow-md transition-all text-base"
+              >⛶</button>
             </div>
           </div>
           <!-- Issue Cards Container -->
@@ -3989,6 +4042,56 @@ ${activeAuditResult.validationTests.map(t => `- [${t.status}] ${t.id}: ${t.name}
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
     }
+
+    // ==========================================================================
+    // DATA FULLSCREEN TOGGLE
+    // ==========================================================================
+    function toggleDataFullscreen(wrapId, innerId) {
+      const wrap = document.getElementById(wrapId);
+      const inner = document.getElementById(innerId);
+      const btn = document.getElementById(`fsBtn-${innerId}`);
+      if (!wrap || !inner || !btn) return;
+
+      const isFs = wrap.classList.contains('data-fullscreen-active');
+      if (!isFs) {
+        // Enter fullscreen
+        wrap.classList.add('data-fullscreen-active');
+        inner.classList.remove('max-h-64', 'max-h-[720px]');
+        inner.classList.add('data-fullscreen-inner');
+        btn.innerHTML = '✕';
+        btn.title = 'Exit fullscreen';
+        btn.classList.add('bg-slate-800', 'text-white', 'border-slate-700');
+        btn.classList.remove('bg-white/80', 'text-slate-500', 'border-slate-200');
+        document.body.style.overflow = 'hidden';
+      } else {
+        // Exit fullscreen
+        wrap.classList.remove('data-fullscreen-active');
+        inner.classList.remove('data-fullscreen-inner');
+        if (innerId === 'tableViewDataPreview') {
+          inner.classList.add('max-h-64');
+        } else {
+          inner.classList.add('max-h-[720px]');
+        }
+        btn.innerHTML = '⛶';
+        btn.title = 'Toggle fullscreen';
+        btn.classList.remove('bg-slate-800', 'text-white', 'border-slate-700');
+        btn.classList.add('bg-white/80', 'text-slate-500', 'border-slate-200');
+        document.body.style.overflow = '';
+      }
+    }
+
+    // Close fullscreen on Escape key
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        ['grammarlyDocPaperWrap', 'tableViewDataWrap'].forEach(wrapId => {
+          const wrap = document.getElementById(wrapId);
+          if (wrap && wrap.classList.contains('data-fullscreen-active')) {
+            const innerId = wrapId === 'grammarlyDocPaperWrap' ? 'grammarlyDocPaper' : 'tableViewDataPreview';
+            toggleDataFullscreen(wrapId, innerId);
+          }
+        });
+      }
+    });
 
     // ==========================================================================
     // REIJO PALMISTE INTERACTIVE SPECULAR LIGHT ENGINE (Ray-Tracing Cursor Follow)
