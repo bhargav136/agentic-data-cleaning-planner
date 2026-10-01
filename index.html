@@ -1079,59 +1079,7 @@ EMP-103, Robert O'Connor, robert@company.com, 142, null, Marketing"
           </div>
         </div>
 
-        <!-- Draggable Floating Full-Information Inspector for Found Out Issues -->
-        <div id="draggableInspectorModal" class="hidden fixed z-50 w-88 sm:w-[420px] rounded-2xl bg-white/95 backdrop-blur-md shadow-2xl border border-sky-300 transition-shadow select-text" style="top: 140px; right: 40px;">
-          <!-- Drag Handle Header -->
-          <div id="dragInspectorHeader" class="px-4 py-2.5 bg-gradient-to-r from-sky-50 via-indigo-50 to-purple-50 border-b border-sky-100 rounded-t-2xl flex items-center justify-between cursor-move select-none" title="Click and drag to move anywhere">
-            <div class="flex items-center gap-2">
-              <span class="text-slate-400 font-mono text-xs">⠿</span>
-              <span class="text-[11px] font-extrabold uppercase tracking-wider text-sky-950" id="dragModalCategory">Spelling Mistake</span>
-            </div>
-            <div class="flex items-center gap-2">
-              <span class="text-[10px] text-slate-400 font-mono">Drag to move</span>
-              <button type="button" onclick="closeDraggableInspector()" class="w-5 h-5 rounded-full hover:bg-slate-200 text-slate-500 flex items-center justify-center text-xs font-bold">✕</button>
-            </div>
-          </div>
 
-          <!-- Content Body -->
-          <div class="p-4 space-y-3 text-xs">
-            <div>
-              <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-0.5">Found Out Anomaly</span>
-              <h4 class="font-bold text-slate-900 text-sm leading-snug" id="dragModalTitle">...</h4>
-            </div>
-
-            <!-- Diff Snippet -->
-            <div class="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between font-mono text-xs">
-              <del class="bg-rose-100 text-rose-900 px-2 py-0.5 rounded font-bold" id="dragModalOrig">...</del>
-              <span class="text-slate-400 mx-2 font-sans font-bold">→</span>
-              <ins class="bg-emerald-100 text-emerald-900 no-underline px-2 py-0.5 rounded font-bold" id="dragModalClean">...</ins>
-            </div>
-
-            <!-- Full Information: Why -->
-            <div>
-              <span class="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-0.5">Architectural Rationale</span>
-              <p class="text-slate-700 leading-relaxed text-xs" id="dragModalWhy">...</p>
-            </div>
-
-            <!-- Evidence -->
-            <div id="dragModalEvidenceBox" class="p-2.5 rounded-lg bg-sky-50/80 border border-sky-100">
-              <span class="text-[10px] font-bold text-sky-800 uppercase block mb-0.5">Audit Evidence &amp; Invariants</span>
-              <code class="text-[11px] font-mono text-sky-950 block" id="dragModalEvidence">...</code>
-            </div>
-
-            <!-- Location & Stats -->
-            <div class="flex items-center justify-between text-[11px] text-slate-500 font-mono pt-1">
-              <span id="dragModalLocation">Column: All • Row 1</span>
-              <span class="font-bold text-amber-700" id="dragModalLoss">0.0% Loss ⭐</span>
-            </div>
-
-            <!-- Actions -->
-            <div class="pt-2 border-t border-slate-100 flex items-center justify-end gap-2" id="dragModalActions">
-              <button type="button" id="dragModalDismissBtn" class="reijo-glass-btn px-3 py-1.5 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-100">Keep Original</button>
-              <button type="button" id="dragModalCleanBtn" class="reijo-glass-emerald px-4 py-1.5 rounded-lg text-xs font-semibold text-white shadow-xs">✓ Clean</button>
-            </div>
-          </div>
-        </div>
 
         <!-- 2. EXECUTIVE TABLE VIEW (Alternative view mode) -->
         <div id="executiveTableView" class="hidden space-y-4">
@@ -3093,7 +3041,6 @@ CLEAN_AGENT_LOSS_LIMIT=0.05
               <div class="flex items-center gap-2 flex-wrap">
                 <span class="px-2 py-0.5 rounded text-[10px] font-bold ${badgeColor}">${badgeLabel}</span>
                 <span class="font-bold text-slate-900 text-xs">${escapeHtml(iss.problem)}</span>
-                <button type="button" onclick="showDraggableInspector(${iss.id})" class="text-[10px] text-sky-600 hover:text-sky-800 font-semibold px-1.5 py-0.5 rounded bg-sky-50 hover:bg-sky-100 transition-colors" title="Open draggable full-information inspector">🔍 Inspect</button>
               </div>
               
               <div class="flex items-center gap-1.5 shrink-0">
@@ -3350,11 +3297,7 @@ CLEAN_AGENT_LOSS_LIMIT=0.05
       renderGrammarlyMode();
       renderPipelineTimeline();
 
-      // Refresh inspector if currently open
-      const modal = document.getElementById('draggableInspectorModal');
-      if (modal && !modal.classList.contains('hidden') && currentRawDataset.focusedIssueId === id) {
-        showDraggableInspector(id);
-      }
+
     }
 
     function dismissGrammarlyFix(id) {
@@ -3395,11 +3338,7 @@ CLEAN_AGENT_LOSS_LIMIT=0.05
       renderGrammarlyMode();
       renderPipelineTimeline();
 
-      // If draggable floating inspector is open for this issue, refresh buttons
-      const modal = document.getElementById('draggableInspectorModal');
-      if (modal && !modal.classList.contains('hidden') && currentRawDataset.focusedIssueId === id) {
-        showDraggableInspector(id);
-      }
+
     }
 
     function openCustomEdit(id) {
@@ -3460,11 +3399,8 @@ CLEAN_AGENT_LOSS_LIMIT=0.05
         cardEl.classList.add('ring-2', 'ring-sky-500');
         setTimeout(() => cardEl.classList.remove('ring-2', 'ring-sky-500'), 1500);
       }
-      // Also show draggable full information inspector
-      showDraggableInspector(id);
     }
 
-    let inspectorDragInitialized = false;
     let splitterDragInitialized = false;
 
     function initSplitterDrag() {
@@ -3519,120 +3455,7 @@ CLEAN_AGENT_LOSS_LIMIT=0.05
       window.addEventListener('touchend', onEnd);
     }
 
-    function initInspectorDrag() {
-      if (inspectorDragInitialized) return;
-      const modal = document.getElementById('draggableInspectorModal');
-      const header = document.getElementById('dragInspectorHeader');
-      if (!modal || !header) return;
 
-      inspectorDragInitialized = true;
-      let isDragging = false;
-      let startX = 0, startY = 0, initialLeft = 0, initialTop = 0;
-
-      const onStart = (clientX, clientY) => {
-        isDragging = true;
-        const rect = modal.getBoundingClientRect();
-        startX = clientX;
-        startY = clientY;
-        initialLeft = rect.left;
-        initialTop = rect.top;
-        modal.style.right = 'auto'; // allow free positioning
-        modal.style.left = `${initialLeft}px`;
-        modal.style.top = `${initialTop}px`;
-        document.body.style.userSelect = 'none';
-      };
-
-      header.addEventListener('mousedown', (e) => {
-        onStart(e.clientX, e.clientY);
-      });
-
-      header.addEventListener('touchstart', (e) => {
-        if (e.touches && e.touches.length === 1) {
-          onStart(e.touches[0].clientX, e.touches[0].clientY);
-        }
-      }, { passive: true });
-
-      window.addEventListener('mousemove', (e) => {
-        if (!isDragging) return;
-        const dx = e.clientX - startX;
-        const dy = e.clientY - startY;
-        modal.style.left = `${Math.max(10, Math.min(window.innerWidth - 380, initialLeft + dx))}px`;
-        modal.style.top = `${Math.max(70, Math.min(window.innerHeight - 300, initialTop + dy))}px`;
-      });
-
-      window.addEventListener('touchmove', (e) => {
-        if (!isDragging || !e.touches || e.touches.length !== 1) return;
-        const dx = e.touches[0].clientX - startX;
-        const dy = e.touches[0].clientY - startY;
-        modal.style.left = `${Math.max(10, Math.min(window.innerWidth - 380, initialLeft + dx))}px`;
-        modal.style.top = `${Math.max(70, Math.min(window.innerHeight - 300, initialTop + dy))}px`;
-      }, { passive: true });
-
-      const onEnd = () => {
-        if (isDragging) {
-          isDragging = false;
-          document.body.style.userSelect = '';
-        }
-      };
-
-      window.addEventListener('mouseup', onEnd);
-      window.addEventListener('touchend', onEnd);
-    }
-
-    function showDraggableInspector(issueId) {
-      const issue = activeAuditResult.issues.find(i => i.id === issueId);
-      if (!issue) return;
-
-      const modal = document.getElementById('draggableInspectorModal');
-      if (!modal) return;
-
-      initInspectorDrag();
-
-      const isSpelling = (issue.category || '').toLowerCase().includes('spell');
-      document.getElementById('dragModalCategory').textContent = isSpelling ? '🔤 ' + issue.category : (issue.category || issue.severity);
-      document.getElementById('dragModalTitle').textContent = issue.problem;
-      document.getElementById('dragModalOrig').textContent = issue.originalSnippet || '(blank)';
-      document.getElementById('dragModalClean').textContent = issue.customReplacement || issue.replacementSnippet || '(cleaned)';
-      document.getElementById('dragModalWhy').textContent = issue.why || 'Data anomaly requiring normalization.';
-      document.getElementById('dragModalEvidence').textContent = issue.evidence || `Matches pattern for [${issue.column}]`;
-      
-      const locText = issue.column ? `Column: ${issue.column}${issue.rowIndex !== undefined && issue.rowIndex !== Infinity ? ` • Row ${issue.rowIndex + 1}` : ''}` : 'Document Content';
-      document.getElementById('dragModalLocation').textContent = locText;
-      document.getElementById('dragModalLoss').textContent = `${issue.estimatedLoss || 0.0}% Loss ⭐`;
-
-      const cleanBtn = document.getElementById('dragModalCleanBtn');
-      const dismissBtn = document.getElementById('dragModalDismissBtn');
-
-      if (issue.status === 'accepted') {
-        cleanBtn.textContent = '✓ Already Cleaned';
-        cleanBtn.className = 'px-4 py-1.5 rounded-lg text-xs font-semibold text-emerald-800 bg-emerald-100 cursor-default';
-        cleanBtn.onclick = null;
-        dismissBtn.textContent = 'Undo';
-        dismissBtn.onclick = () => {
-          undoGrammarlyFix(issue.id);
-          showDraggableInspector(issue.id);
-        };
-      } else {
-        cleanBtn.textContent = '✓ Clean';
-        cleanBtn.className = 'reijo-glass-emerald px-4 py-1.5 rounded-lg text-xs font-semibold text-white shadow-xs';
-        cleanBtn.onclick = () => {
-          acceptGrammarlyFix(issue.id);
-          showDraggableInspector(issue.id);
-        };
-        dismissBtn.textContent = 'Keep Original';
-        dismissBtn.onclick = () => {
-          dismissGrammarlyFix(issue.id);
-          closeDraggableInspector();
-        };
-      }
-
-      modal.classList.remove('hidden');
-    }
-
-    function closeDraggableInspector() {
-      const modal = document.getElementById('draggableInspectorModal');
-      if (modal) modal.classList.add('hidden');
-    }
 
     function toggleCardFullInfo(id) {
       const infoEl = document.getElementById(`card-full-info-${id}`);
@@ -3909,8 +3732,7 @@ CLEAN_AGENT_LOSS_LIMIT=0.05
       renderGrammarlyMode();
       renderPipelineTimeline();
 
-      // If draggable floating inspector is open, close or update it
-      closeDraggableInspector();
+
 
       alert(`✅ Full rollback complete. All ${currentRawDataset.rows ? currentRawDataset.rows.length : 0} original rows restored.`);
     }
