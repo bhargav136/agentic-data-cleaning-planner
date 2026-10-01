@@ -111,17 +111,22 @@ function runAutonomousAudit(rows = [], cols = [], options = {}) {
           if (!ocrTypoExample) { ocrTypoExample = strVal; ocrTypoRowIdx = rowIdx; }
         }
 
-        // Numeric parsing
-        const cleanNum = parseFloat(strVal.replace(/[\$,]/g, ''));
-        if (!isNaN(cleanNum)) {
-          numCount++;
-          numSum += cleanNum;
-          numericValues.push(cleanNum);
-          if (cleanNum < minNum) minNum = cleanNum;
-          if (cleanNum > maxNum) maxNum = cleanNum;
-          if (cleanNum < 0) {
-            negativeCount++;
-            if (!negativeExample) { negativeExample = strVal; negativeRowIdx = rowIdx; }
+        // Numeric parsing (strictly ignore dates, codes, and non-numeric strings)
+        const isDatePattern = col.toLowerCase().includes('date') || col.toLowerCase().includes('dob') || /^\d{1,4}[-\/\.]\d{1,2}[-\/\.]\d{1,4}$/.test(strVal) || /^(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)/i.test(strVal);
+        const isPureNumber = !isDatePattern && /^-?\$?\s*[\d,]+(\.\d+)?$/.test(strVal.trim());
+
+        if (isPureNumber) {
+          const cleanNum = parseFloat(strVal.replace(/[\$,]/g, ''));
+          if (!isNaN(cleanNum)) {
+            numCount++;
+            numSum += cleanNum;
+            numericValues.push(cleanNum);
+            if (cleanNum < minNum) minNum = cleanNum;
+            if (cleanNum > maxNum) maxNum = cleanNum;
+            if (cleanNum < 0) {
+              negativeCount++;
+              if (!negativeExample) { negativeExample = strVal; negativeRowIdx = rowIdx; }
+            }
           }
         }
 
@@ -369,9 +374,9 @@ function runAutonomousAudit(rows = [], cols = [], options = {}) {
         severity: 'Moderate',
         category: 'Statistical Outlier',
         originalSnippet: String(outlierExample),
-        replacementSnippet: '[FLAGGED — verify with domain expert]',
-        what: `Flag ${outliersCount} value${outliersCount > 1 ? 's' : ''} in [${col}] falling outside IQR fence [${outlierLow.toFixed(2)} – ${outlierHigh.toFixed(2)}].`,
-        why: 'Values beyond Q1 - 1.5*IQR or Q3 + 1.5*IQR are statistical extremes. May indicate data entry errors or currency scaling issues.',
+        replacementSnippet: String(outlierExample), // Preserve value, do not corrupt with FLAGGED text
+        what: `Audit ${outliersCount} statistical outlier${outliersCount > 1 ? 's' : ''} in [${col}]. Value retained without silent distortion.`,
+        why: 'Values beyond Q1 - 1.5*IQR or Q3 + 1.5*IQR are statistical extremes. Clean Agent preserves the authentic value while flagging it for domain audit.',
         evidence: `Fence: [${outlierLow.toFixed(2)}, ${outlierHigh.toFixed(2)}]. First anomaly: "${outlierExample}" at row ${outlierRowIdx + 1}.`,
         confidence: 91.0,
         estimatedLoss: 0.5,

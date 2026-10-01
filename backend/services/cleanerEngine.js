@@ -50,6 +50,8 @@ function applyCleaningPipeline(originalRows = [], allIssues = [], acceptedIssueI
   acceptedIssues.forEach(iss => {
     // Skip duplicate issue since it was handled structurally above
     if (iss._duplicateRowIndices && Array.isArray(iss._duplicateRowIndices)) return;
+    // Skip statistical outliers to preserve numbers and avoid text corruption
+    if (iss.category === 'Statistical Outlier') return;
 
     totalLoss += parseFloat(iss.estimatedLoss) || 0;
     const target = iss.originalSnippet;
